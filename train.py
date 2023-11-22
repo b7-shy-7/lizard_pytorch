@@ -9,10 +9,16 @@ from torchvision.datasets import FashionMNIST
 from torch.utils.tensorboard import SummaryWriter
 
 from tqdm import tqdm
+from itertools import product
 
 from network import Net
 
-batch_size = 100
+parameters = dict(
+    lr_list = [.01, .001, .0001],
+    batch_size_list = [100, 1000, 10000],
+    shuffle = [True, False]
+)
+
 
 dataset = FashionMNIST(
     root = './data',
@@ -23,45 +29,50 @@ dataset = FashionMNIST(
     download = True
 )
 
-net = Net(batch_size=batch_size)
+param_values = [v for v in parameters.values()]
 
-loader = DataLoader(dataset, batch_size = batch_size)
-optimizer = optim.Adam(net.parameters(), lr = 0.01)
-loss = nn.CrossEntropyLoss()
+for lr, batch_size, shuffle in product(*param_values):
+    comment = f' batch size = {batch_size}, lr = {lr}, shuffle = {shuffle}'
 
-correct_number = 0
+    net = Net(batch_size = batch_size).cuda()
+    loader = DataLoader(dataset, batch_size = batch_size, shuffle = shuffle, num_workers = 4)
+    optimizer = optim.Adam(net.parameters(), lr = 0.01)
+    loss = nn.CrossEntropyLoss().cuda()
+    correct_number = 0
 
-tb  = SummaryWriter()
-images, labels = next(iter(loader))
-grid = torchvision.utils.make_grid(images)
+    tb  = SummaryWriter(comment = comment)
+    images, labels = next(iter(loader))
+    images = images.cuda()
+    lebels = labels.cuda()
+    grid = torchvision.utils.make_grid(images)
 
-tb.add_image('images', grid)
-tb.add_graph(net, images)
-# tb.close()
+    tb.add_image('images', grid)
+    tb.add_graph(net, images)
+    # tb.close()
 
-for epoch in range(10):
-    total_loss = 0
-    total_correct = 0
-    for data, label in tqdm(loader, desc = "Training Epoch %d: ".format(epoch)):
-        # data = data.cuda()
-        # label = label.cuda()
-        output = net(data)
-        label = label
-        # output = torch.argmax(output, dim = 1)
-        loss = nn.CrossEntropyLoss()(output, label)
+    for epoch in range(10):
+        total_loss = 0
+        total_correct = 0
+        for data, label in tqdm(loader, desc = "Training Epoch {}: ".format(epoch)):
+            data = data.cuda()
+            label = label.cuda()
+            output = net(data)
+            label = label
+            # output = torch.argmax(output, dim = 1)
+            loss = nn.CrossEntropyLoss()(output, label)
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        correct_number += torch.argmax(output, dim = 1).eq(label).sum(dim = 0)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            correct_number += torch.argmax(output, dim = 1).eq(label).sum(dim = 0)
 
-        total_loss += loss.item()
-        total_correct = correct_number
-        # print(loss)
-    
-    tb.add_scalar('Loss', total_loss, epoch)
-    tb.add_scalar('Number Correct', total_correct, epoch)
-    tb.add_scalar('Accuracy', correct_number.item() / len(dataset), epoch)
+            total_loss += loss.item()
+            total_correct = correct_number
+        
+        tb.add_scalar('Loss', total_loss, epoch)
+        tb.add_scalar('Number Correct', total_correct, epoch)
+        tb.add_scalar('Accuracy', correct_number.item() / len(dataset), epoch)
+        print('\n')
 
     tb.add_histogram('conv1.bias', net.conv1.bias, epoch)
     tb.add_histogram('conv.weight', net.conv1.weight, epoch)
